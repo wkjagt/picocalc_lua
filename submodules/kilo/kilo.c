@@ -98,6 +98,9 @@ struct editorConfig {
 	int coloff;
 	int screenrows;
 	int screencols;
+	int totalscreencols;
+	int margin;     /* Size of the margin for line numbers */
+	int linenumbersenabled;
 	int numrows;
 	erow *row;
 	int dirty;
@@ -231,6 +234,15 @@ int editorReadKey() {
 		}
 	}
 	return KEY_NULL; // shouldn't reach
+}
+
+void calculateMargin(void) {
+	if(E.linenumbersenabled) {
+		E.margin = snprintf(NULL, 0, "%d", E.numrows) + 1;
+	} else {
+		E.margin = 0;
+	}
+	E.screencols = E.totalscreencols - E.margin;
 }
 
 int getCursorPosition(int *rows, int *cols) {
@@ -477,6 +489,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 	editorUpdateRow(&E.row[at]);
 
 	E.numrows++;
+	calculateMargin();
 	E.dirty++;
 }
 
@@ -492,6 +505,7 @@ void editorDelRow(int at) {
 	memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
 	for (int j = at; j < E.numrows - 1; j++) E.row[j].idx--;
 	E.numrows--;
+	calculateMargin();
 	E.dirty++;
 }
 
@@ -793,6 +807,17 @@ void editorDrawRows(struct abuf *ab) {
 				abAppend(ab, "~", 1);
 			}
 		} else {
+			if(E.margin) {
+				char linenr[32];
+				snprintf(
+					linenr,
+					sizeof(linenr),
+					"\x1b[90m%*d \x1b[39m",
+					E.margin-1,
+					filerow+1
+				);
+				abAppend(ab, linenr, strlen(linenr));
+			}
 			int len = E.row[filerow].rsize - E.coloff;
 			if (len < 0) len = 0;
 			if (len > E.screencols) len = E.screencols;
@@ -862,10 +887,10 @@ void editorDrawStatusBar(struct abuf *ab) {
 		//E.syntax ? E.syntax->filetype : "no ft",
 	);
 	int rlen_ansi = strlenWithoutANSI(rstatus, NULL);
-	if (len > E.screencols) len = E.screencols;
+	if (len > E.totalscreencols) len = E.totalscreencols;
 	abAppend(ab, status, len);
-	while (len < E.screencols) {
-		if (E.screencols - len == rlen_ansi) {
+	while (len < E.totalscreencols) {
+		if (E.totalscreencols - len == rlen_ansi) {
 			abAppend(ab, rstatus, rlen);
 			break;
 		} else {
@@ -900,8 +925,7 @@ void editorRefreshScreen() {
 	editorDrawMessageBar(&ab);
 
 	char buf[32];
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,
-																						(E.rx - E.coloff) + 1);
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,(E.rx - E.coloff) + 1 + E.margin);
 	abAppend(&ab, buf, strlen(buf));
 
 	abAppend(&ab, "\x1b[?25h", 6);
@@ -1097,6 +1121,8 @@ int editorProcessKeypress() {
 			break;
 
 		case CTRL_L:
+			E.linenumbersenabled = !E.linenumbersenabled;
+			calculateMargin();
 		case '\x1b':
 			break;
 
@@ -1124,8 +1150,11 @@ void initEditor() {
 	E.statusmsg[0] = '\0';
 	E.statusmsg_time = 0;
 	E.syntax = NULL;
+	E.margin = 0;
+	E.linenumbersenabled = 1;
 
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+	E.totalscreencols = E.screencols;
 	E.screenrows -= 2;
 }
 
